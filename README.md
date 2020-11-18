@@ -1,4 +1,4 @@
-﻿# DELAT SQS WITH STEP FUNCTION
+﻿# DELAY SQS WITH STEP FUNCTION
  
  SQS offers us the option to send messages with a maximum delay of 15 minutes.With this structure, we can send messages delayed more than 15 minutes.
 
