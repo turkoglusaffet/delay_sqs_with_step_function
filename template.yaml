@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: > 
+   SQS DELAY
+Parameters:
+  TestSqsQueueName:
+    Type: String
+    Default: "arn:aws:sqs:REGION:ACCOUNT_ID:QUEUE_NAME"
+  TestSqsDeadLetterQueueName:
+    Type: String
+    Default: "arn:aws:sqs:REGION:ACCOUNT_ID:DEAD_LETTER_QUEUE_NAME"
+  
+Resources:
+  ApiGatewayStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: !Join ["", ["/", !Ref "AWS::StackName", "/"]]
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowApiGatewayServiceToAssumeRole
+            Effect: Allow
+            Action:
+              - 'sts:AssumeRole'
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: CallStepFunctions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'states:StartExecution'
+                Resource:
+                  - !Ref StepFunctionsStateMachine
+
+
+
+  StepFunctionsStateMachine:
+      Type: "AWS::StepFunctions::StateMachine"
+      Properties:
+          StateMachineName: !Sub ${AWS::StackName}-state-machine
+          RoleArn: !GetAtt StepFunctionsServiceRole.Arn
+          DefinitionString: |- 
+            {
+              "StartAt": "Delay",
+              "Comment": "Send to SQS with delay",
+              "States": {
+                "Delay": {
+                  "Type": "Wait",
+                  "SecondsPath": "$.delay_seconds",
+                  "Next": "Decision"
+                },
+                "Decision": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.status",
+                      "StringEquals": "SUCCESS",
+                      "Next": "Send to Queue"
+                    },
+                    {
+                      "Variable": "$.status",
+                      "StringEquals":"FAILED",
+                      "Next": "Send to Dead Letter Queue"
+                    }
+                  ],
+                  "Default": "Send to Queue"
+                },
+                "Send to Dead Letter Queue": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "Parameters": {
+                    "QueueUrl": "https://sqs.REGION.amazonaws.com/ACCOUNT_ID/DEAD_LETTER_QUEUE_NAME",
+                    "MessageBody": {
+                      "Input.$": "$.message"
+                    }
+                  },
+                  "End": true
+                },
+                "Send to Queue": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sqs:sendMessage",
+                  "Parameters": {
+                    "QueueUrl": "https://sqs.REGION.amazonaws.com/ACCOUNT_ID/QUEUE_NAME",
+                    "MessageBody": {
+                      "Input.$": "$.message"
+                    }
+                  },
+                  "End": true
+                }
+              }
+            }
+            
+
+  StepFunctionsServiceRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+          Path: !Join ["", ["/", !Ref "AWS::StackName", "/"]]
+          ManagedPolicyArns:
+              - "arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess"
+          AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                  -
+                      Sid: "AllowStepFunctionsServiceToAssumeRole"
+                      Effect: "Allow"
+                      Action: 
+                          - "sts:AssumeRole"
+                      Principal:
+                          Service:
+                              - !Sub "states.${AWS::Region}.amazonaws.com"
+          Policies:
+              -   PolicyName: "SendToQueue"
+                  PolicyDocument:
+                      Version: '2012-10-17'
+                      Statement:
+                          -   Effect: "Allow"
+                              Action:
+                                  - "sqs:SendMessage"
+                              Resource: 
+                                  - !Ref TestSqsQueueName
+                                  - !Ref TestSqsDeadLetterQueueName
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Dev
+      Name: !Sub ${AWS::StackName}-api
+      DefinitionBody:
+        'Fn::Transform':
+          Name: AWS::Include
+          Parameters:
+            Location: ./openapi.yaml
+Outputs:
+    StepFunctionsStateMachine:
+        Description: Step Functions State Machine ARN
+        Value: !Ref StepFunctionsStateMachine
