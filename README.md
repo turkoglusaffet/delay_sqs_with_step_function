@@ -5,7 +5,7 @@
 ![](./stepfunctions_graph.png)
 
 
-The step function has got 2 endpoints on API GATEWAY. We can send to message its.
+The step function has got 2 endpoints on api gateway. We be able to invoke the step function by api gateway.
 
 Sample : 
 
